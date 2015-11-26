@@ -136,6 +136,9 @@
 #include <asm/processor.h>
 #include <asm/tlbflush.h> // for flush_tlb_page
 #include <asm/cpufeature.h>
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0)
+#undef CONFIG_MTRR
+#endif
 #ifdef CONFIG_MTRR
 #include <asm/mtrr.h>
 #endif
@@ -631,7 +634,12 @@ static int firegl_major_proc_read(struct seq_file *m, void* data)
 
     len = snprintf(buf, request, "%d\n", major);
 #else
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4,3,0)
     len = seq_printf(m, "%d\n", major);
+#else
+    seq_printf(m, "%d\n", major);
+    len = 0;
+#endif
 #endif
 
     KCL_DEBUG1(FN_FIREGL_PROC, "return len=%i\n",len);
