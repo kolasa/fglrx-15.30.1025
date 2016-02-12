@@ -65,9 +65,6 @@
 #include <asm/io.h>
 #include <asm/mman.h>
 #include <asm/uaccess.h>
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0)
-#undef CONFIG_MTRR
-#endif
 #ifdef CONFIG_MTRR
 #include <asm/mtrr.h>
 #endif
