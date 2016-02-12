@@ -136,9 +136,6 @@
 #include <asm/processor.h>
 #include <asm/tlbflush.h> // for flush_tlb_page
 #include <asm/cpufeature.h>
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,3,0)
-#undef CONFIG_MTRR
-#endif
 #ifdef CONFIG_MTRR
 #include <asm/mtrr.h>
 #endif
@@ -211,6 +208,10 @@
 #include "kcl_osconfig.h"
 #include "kcl_io.h"
 #include "kcl_debug.h"
+
+#ifndef XSTATE_FP
+#define XSTATE_FP XFEATURE_MASK_FP
+#endif
 
 // ============================================================
 
@@ -634,11 +635,10 @@ static int firegl_major_proc_read(struct seq_file *m, void* data)
 
     len = snprintf(buf, request, "%d\n", major);
 #else
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4,3,0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 3, 0)
     len = seq_printf(m, "%d\n", major);
 #else
     seq_printf(m, "%d\n", major);
-    len = 0;
 #endif
 #endif
 
@@ -3432,7 +3432,11 @@ int ATI_API_CALL KCL_MEM_MTRR_Support(void)
 int ATI_API_CALL KCL_MEM_MTRR_AddRegionWc(unsigned long base, unsigned long size)
 {
 #ifdef CONFIG_MTRR
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 3, 0)
     return mtrr_add(base, size, MTRR_TYPE_WRCOMB, 1);
+#else
+    return arch_phys_wc_add(base, size);
+#endif
 #else /* !CONFIG_MTRR */
     return -EPERM;
 #endif /* !CONFIG_MTRR */
@@ -3441,7 +3445,12 @@ int ATI_API_CALL KCL_MEM_MTRR_AddRegionWc(unsigned long base, unsigned long size
 int ATI_API_CALL KCL_MEM_MTRR_DeleteRegion(int reg, unsigned long base, unsigned long size)
 {
 #ifdef CONFIG_MTRR
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 3, 0)
     return mtrr_del(reg, base, size);
+#else
+    arch_phys_wc_del(reg);
+    return reg;
+#endif
 #else /* !CONFIG_MTRR */
     return -EPERM;
 #endif /* !CONFIG_MTRR */
@@ -6443,6 +6452,48 @@ int ATI_API_CALL kcl_sscanf(const char * buf, const char * fmt, ...)
     return i;
 }
 
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,2,0)
+/*
+ * Save processor xstate to xsave area.
+ */
+static void _copy_xregs_to_kernel(struct xregs_state *xstate)
+{
+        u64 mask = -1;
+        u32 lmask = mask;
+        u32 hmask = mask >> 32;
+        int err = 0;
+
+        /*WARN_ON(!alternatives_patched);*/
+
+        /*
+         * If xsaves is enabled, xsaves replaces xsaveopt because
+         * it supports compact format and supervisor states in addition to
+         * modified optimization in xsaveopt.
+         *
+         * Otherwise, if xsaveopt is enabled, xsaveopt replaces xsave
+         * because xsaveopt supports modified optimization which is not
+         * supported by xsave.
+         *
+         * If none of xsaves and xsaveopt is enabled, use xsave.
+         */
+        alternative_input_2(
+                "1:"XSAVE,
+                XSAVEOPT,
+                X86_FEATURE_XSAVEOPT,
+                XSAVES,
+                X86_FEATURE_XSAVES,
+                [xstate] "D" (xstate), "a" (lmask), "d" (hmask) :
+                "memory");
+        asm volatile("2:\n\t"
+                     xstate_fault(err)
+                     : "0" (err)
+                     : "memory");
+
+        /* We should never fault when copying to a kernel buffer: */
+        WARN_ON_FPU(err);
+}
+#endif
+
 /** \brief Generate UUID
  *  \param buf pointer to the generated UUID
  *  \return None
@@ -6462,12 +6513,8 @@ static int KCL_fpu_save_init(struct task_struct *tsk)
       fpu_xsave(fpu);
       if (!(fpu->state->xsave.xsave_hdr.xstate_bv & XSTATE_FP))
 #else
-	  copy_xregs_to_kernel(&fpu->state.xsave);
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
-      if (!(fpu->state.xsave.header.xfeatures & XFEATURE_MASK_FP))
-#else
+	  _copy_xregs_to_kernel(&fpu->state.xsave);
       if (!(fpu->state.xsave.header.xfeatures & XSTATE_FP))
-#endif
 #endif
          return 1;
    } else if (static_cpu_has(X86_FEATURE_FXSR)) {
