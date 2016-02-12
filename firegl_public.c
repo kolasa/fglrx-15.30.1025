@@ -6466,7 +6466,7 @@ static int KCL_fpu_save_init(struct task_struct *tsk)
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,0)
       if (!(fpu->state.xsave.header.xfeatures & XFEATURE_MASK_FP))
 #else
-      if (!(fpu->state.xsave.header.xfeatures & XSTATE_FP))
+      if (!(fpu->state.xsave.header.xfeatures & XSTATE_XP))
 #endif
 #endif
          return 1;
